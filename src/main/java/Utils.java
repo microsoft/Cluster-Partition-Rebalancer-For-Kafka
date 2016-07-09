@@ -21,33 +21,56 @@ import java.util.regex.Pattern;
 
 public class Utils {
     private static Logger logger = LoggerFactory.getLogger(Utils.class);
-
-    public static String GetZookeeperConnectionString(int port) throws Exception {
-        //TODO: Following code is specific to my cluster
-        logger.debug("Creating Zookeeper string from D:\\data\\machineinfo.csv");
-        StringBuilder zkStrBuilder = new StringBuilder();
-        while(true) {
-            try {
-                Scanner scan = new Scanner(new File("D:\\data\\machineinfo.csv"));
-                while (scan.hasNextLine()) {
-                    String line = scan.nextLine();
-                    if(line.contains("Zookeeper"))
-                    {
-                        String zkMachineName = line.split(",")[0];
-                        zkStrBuilder.append(zkMachineName);
-                        zkStrBuilder.append(":2181,");
-                    }
-                }
-                break;
-            }catch (Exception ex) {
-                logger.debug("Failed to read {} because of {}. Will retry after a sleep", "D:\\data\\machineinfo.csv", ex);
-                Thread.sleep(1000);
-            }
+    private static final String OS = System.getProperty("os.name").toLowerCase();
+    private static Properties props = new Properties();
+    static {
+        try {
+            props.load(new FileReader("settings.properties"));
         }
+        catch (Exception ex) {
+            logger.error(ex.toString());
+        }
+    }
 
-        String zkConnStr = zkStrBuilder.substring(0, zkStrBuilder.length() - 1);
-        logger.debug("Zookeeper connection string=" + zkConnStr);
-        return zkConnStr;
+    public static String getZookeeperConnectionString(int port) throws Exception {
+        //TODO: Following code is specific to my cluster
+        if(OS.indexOf("win") >= 0) {
+            logger.debug("Creating Zookeeper string from D:\\data\\machineinfo.csv");
+            StringBuilder zkStrBuilder = new StringBuilder();
+            while (true) {
+                try {
+                    Scanner scan = new Scanner(new File("D:\\data\\machineinfo.csv"));
+                    while (scan.hasNextLine()) {
+                        String line = scan.nextLine();
+                        if (line.contains("Zookeeper")) {
+                            String zkMachineName = line.split(",")[0];
+                            zkStrBuilder.append(zkMachineName);
+                            zkStrBuilder.append(":2181,");
+                        }
+                    }
+                    break;
+                } catch (Exception ex) {
+                    logger.debug("Failed to read {} because of {}. Will retry after a sleep", "D:\\data\\machineinfo.csv", ex);
+                    Thread.sleep(1000);
+                }
+            }
+
+            String zkConnStr = zkStrBuilder.substring(0, zkStrBuilder.length() - 1);
+            logger.debug("Zookeeper connection string=" + zkConnStr);
+            return zkConnStr;
+        }
+        else {
+            return props.getProperty("zookeeper.connect");
+            //return "zk1-k09v2:2181,zk2-k09v2:2181,zk4-k09v2:2181";
+        }
+    }
+
+    public static List<String> getLiveBrokers(CuratorFramework client) throws Exception {
+        String brokerIdsZNode = ZookeeperBackedAdoptionLogicImpl.BROKERS_ROOT_ZNODE + "/ids";
+        logger.debug("Getting children of {}", brokerIdsZNode);
+        List<String> children = client.getChildren().forPath(brokerIdsZNode);
+        logger.debug("Found {} children of {}", children.size(), brokerIdsZNode);
+        return children;
     }
 
     public static List<String> getTopics(CuratorFramework client) throws Exception {
@@ -67,24 +90,29 @@ public class Utils {
 
     public static int getBrokerCount() throws Exception {
         //TODO: Following code is specific to my cluster
-        logger.debug("Getting broker count from D:\\data\\machineinfo.csv");
-        int brokerCount = 0;
-        while(true) {
-            try {
-                Scanner scan = new Scanner(new File("D:\\data\\machineinfo.csv"));
-                while (scan.hasNextLine()) {
-                    if (scan.nextLine().contains("Kafka")) {
-                        brokerCount++;
+        if(OS.indexOf("win") >= 0) {
+            logger.debug("Getting broker count from D:\\data\\machineinfo.csv");
+            int brokerCount = 0;
+            while (true) {
+                try {
+                    Scanner scan = new Scanner(new File("D:\\data\\machineinfo.csv"));
+                    while (scan.hasNextLine()) {
+                        if (scan.nextLine().contains("Kafka")) {
+                            brokerCount++;
+                        }
                     }
+                    break;
+                } catch (Exception ex) {
+                    logger.debug("Failed to read {} because of {}. Will retry after a sleep", "D:\\data\\machineinfo.csv", ex);
+                    Thread.sleep(1000);
                 }
-                break;
-            }catch (Exception ex) {
-                logger.debug("Failed to read {} because of {}. Will retry after a sleep", "D:\\data\\machineinfo.csv", ex);
-                Thread.sleep(1000);
             }
+            logger.debug("Broker count=" + brokerCount);
+            return brokerCount;
         }
-        logger.debug("Broker count=" + brokerCount);
-        return brokerCount;
+        else {
+            return Integer.parseInt(props.getProperty("broker.count"));
+        }
     }
 
     public static int getPartitionCount(CuratorFramework client, String topic) throws Exception {
@@ -111,9 +139,15 @@ public class Utils {
     }
 
     public static int getLocalBrokerId() throws Exception {
-        Properties props = new Properties();
-        props.load(new FileReader("D:\\data\\Kafka\\conf\\server.properties"));
-        return Integer.parseInt(props.getProperty("broker.id"));
+        if(OS.indexOf("win") >= 0) {
+            //TODO: Following code is specific to my cluster
+            Properties props = new Properties();
+            props.load(new FileReader("D:\\data\\Kafka\\conf\\server.properties"));
+            return Integer.parseInt(props.getProperty("broker.id"));
+        }
+        else {
+            return Integer.parseInt(props.getProperty("broker.id"));
+        }
     }
 
     public static int getSubStringOccurrenceCount(String fullString, String subString) {
@@ -141,5 +175,25 @@ public class Utils {
         }
 
         return "";
+    }
+
+    public static String getDataFromTopicPartitionStateZNode(CuratorFramework client, String topic, int partition) throws Exception {
+        String partitionStatePath = ZookeeperBackedAdoptionLogicImpl.BROKERS_ROOT_ZNODE + "/topics/" + topic + "/partitions/" + partition + "/state";
+        logger.debug("Getting data of {}", partitionStatePath);
+        String nodeData = new String(client.getData().forPath(partitionStatePath));
+        logger.debug("Found data of znode {} as {}", partitionStatePath, nodeData);
+        return nodeData;
+    }
+
+    public static int getLeaderOfTopicPartition(CuratorFramework client, String topic, int partition) throws Exception {
+        String stateData = getDataFromTopicPartitionStateZNode(client, topic, partition);
+        Pattern pattern = Pattern.compile("\"leader\":(.*?),");
+        Matcher matcher = pattern.matcher(stateData);
+        matcher.find();
+        return Integer.parseInt(matcher.group(1));
+    }
+
+    public static void restartKafkaController(CuratorFramework client) throws Exception {
+        client.delete().forPath("/controller");
     }
 }

@@ -51,8 +51,8 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
         props = new Properties();
         props.load(new FileReader("settings.properties"));
 
-        String zkConnString = Utils.GetZookeeperConnectionString(2181);
-        logger.debug("Zookeeper connection string is {}", zkConnString);
+        String zkConnString = Utils.getZookeeperConnectionString(2181);
+        logger.info("Zookeeper connection string is {}", zkConnString);
 
         client = CuratorFrameworkFactory.newClient(
                 zkConnString,
@@ -314,9 +314,11 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
                             "--execute"
                     };
                     ReassignPartitionsCommand.main(reassignCmdArgs);
-                    //Hacky: Sleep for 10 mins to let the reassignment process complete
-                    logger.debug("Reassignment command has been initiated. Will sleep for 5 mins");
-                    Thread.sleep(5 * 60000);
+                    //Hacky: Restart kafka controller. Controller seems buggy sometimes
+                    Utils.restartKafkaController(client);
+                    //Hacky: Sleep for 5 mins to let the reassignment process complete
+                    logger.debug("Reassignment command has been initiated. Will sleep for {} ms", 10 * 60000);
+                    Thread.sleep(10 * 60000);
 
                     Files.deleteIfExists(Paths.get(reassignmentConfigFileName));
 
