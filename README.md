@@ -31,4 +31,4 @@ java -cp "partitionRebalancerForKafka-1.0-SNAPSHOT.jar:*" BrokerLoadWatcher
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg?style=plastic)](https://github.com/Microsoft/SparkCLR/blob/master/LICENSE.txt)
 
-Cluster Partition Rebalancer For Kafka is licensed under the MIT license. See [LICENSE](LICENSE) file for full license information.
+Cluster Partition Rebalancer For Kafka is licensed under the MIT license. See [LICENCE.txt](LICENCE.txt) file for full license information.
