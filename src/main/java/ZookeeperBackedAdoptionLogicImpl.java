@@ -35,6 +35,7 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
     private static final String AD_ADOPTION_COMPLETE_TEXT = "INACTIVE";
     private static final String ENABLE_ADOPTION_TEXT = "ENABLE";
 
+
     private static final long AD_EXPIRY_MS = 20 * 60 * 1000;
 
     private Random rand;
@@ -54,16 +55,12 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
         String zkConnString = Utils.getZookeeperConnectionString(2181);
         logger.info("Zookeeper connection string is {}", zkConnString);
 
-        client = CuratorFrameworkFactory.newClient(
-                zkConnString,
-                new ExponentialBackoffRetry(1000, 30)
-        );
+        client = CuratorFrameworkFactory.newClient(zkConnString, new ExponentialBackoffRetry(1000, 30));
         client.start();
         try {
             client.create().creatingParentsIfNeeded().forPath(ADOPTION_ADS_ROOT_ZNODE);
             client.create().creatingParentsIfNeeded().forPath(ADOPTION_ADS_LOCK_ROOT_ZNODE);
-        }
-        catch(KeeperException.NodeExistsException nodeExistsEx) {
+        } catch (KeeperException.NodeExistsException nodeExistsEx) {
             logger.debug("Ignoring Node Exists Exception for {}", ADOPTION_ADS_ROOT_ZNODE);
         }
 
@@ -72,7 +69,7 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
 
     @Override
     protected void finalize() throws Throwable {
-        if(client != null) {
+        if (client != null) {
             client.close();
         }
         super.finalize();
@@ -93,7 +90,9 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
                 //eager to give out only 50% of the time
                 double randomFlip = rand.nextDouble();
 
-                if(randomFlip < .50) {
+               if(randomFlip < .50) 
+               {
+                     logger.debug("Giveout First");
                     if ((partitionToGiveOut = findLocalPartitionToGiveOut()) != null) {
                         logger.debug("Going to advertise partition {}", partitionToGiveOut.getPartitionFullNameWithBrokerId());
                         advertisePartitionForAdoption(partitionToGiveOut);
@@ -109,6 +108,7 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
                     }
                 }
                 else {
+                    logger.debug("Takein First");
                     if ((partitionToTakeIn = findRemotePartitionToTakeIn()) != null) {
                         logger.debug("Going to adopt partition {}", partitionToTakeIn.getPartitionFullNameWithBrokerId());
                         adoptRemotePartition(partitionToTakeIn);
@@ -149,19 +149,20 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
         logger.debug("Finding Partition to Give out");
         List<String> topics = Utils.getTopics(client);
         for (String topic : topics) {
-            int averageDirectoryCountPerBroker = (int)Math.ceil((double) (Utils.getPartitionCount(client, topic) * Utils.getReplicationFactor(client, topic)) / (double)Utils.getBrokerCount());
+            int averageDirectoryCountPerBroker = (int) Math
+                    .ceil((double) (Utils.getPartitionCount(client, topic) * Utils.getReplicationFactor(client, topic))
+                            / (double) Utils.getBrokerCount());
             logger.debug("Average Directory count per Broker for topic {}: {}", topic, averageDirectoryCountPerBroker);
             String zNodeDataForTopic = Utils.getDataFromTopicZNode(client, topic);
             String localBrokerIdStr = "" + Utils.getLocalBrokerId();
-            int directoryCountOnLocalBroker = Utils.getSubStringOccurrenceCount(zNodeDataForTopic, localBrokerIdStr);
-            logger.debug("Directory count on local broker for topic {} is {}", topic, directoryCountOnLocalBroker);
-            if(directoryCountOnLocalBroker > averageDirectoryCountPerBroker) {
+            logger.debug("zNodeDataForTopic: {}  localBrokerIdStr: {} ", zNodeDataForTopic, localBrokerIdStr);
+            int directoryCountOnLocalBroker = Utils.getPartitionCountOnBrokerForTopic(zNodeDataForTopic,
+                    localBrokerIdStr);
+            logger.debug("Directory count on local broker {} for topic {} is {}", Utils.getLocalBrokerId(), topic, directoryCountOnLocalBroker);
+            if (directoryCountOnLocalBroker > averageDirectoryCountPerBroker) {
                 logger.debug("Topic {} has directoryCountOnLocalBroker > averageDirectoryCountPerBroker", topic);
-                Partition retPartition = new Partition(
-                        Integer.parseInt(localBrokerIdStr),
-                        topic,
-                        Utils.getAnyPartitionNumberForBrokerAndTopic(zNodeDataForTopic, localBrokerIdStr)
-                );
+                Partition retPartition = new Partition(Integer.parseInt(localBrokerIdStr), topic,
+                        Utils.getAnyPartitionNumberForBrokerAndTopic(zNodeDataForTopic, localBrokerIdStr));
                 logger.debug("Partition to Give out: {}", retPartition.getPartitionFullName());
                 return retPartition;
             }
@@ -172,7 +173,7 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
 
     public Partition findRemotePartitionToTakeIn() throws Exception {
         logger.debug("Finding Partition to Take in");
-        //get the adoption ads and create Partition objects out of them
+        // get the adoption ads and create Partition objects out of them
         List<String> adoptionAds = Utils.getAdoptionAds(client);
         logger.debug("Total Ads discovered = {}", adoptionAds.size());
 
@@ -180,26 +181,32 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
         for (String adoptionAd : adoptionAds) {
             try {
                 Partition tmpPartition = Partition.createPartition(adoptionAd);
-                //note that this will overwrite any previous partitions for this topic, but that is ok
+                // note that this will overwrite any previous partitions for
+                // this topic, but that is ok
                 adoptionAdsTopicsPartitionsMap.put(tmpPartition.topicName, tmpPartition);
-            }catch(Exception ex) {
+            } catch (Exception ex) {
                 logger.debug("Ad {} seems to be of invalid structure. Ignoring.", adoptionAd);
             }
         }
 
         List<String> topics = Utils.getTopics(client);
         for (String topic : topics) {
-            int averageDirectoryCountPerBroker = (int)Math.ceil((double) (Utils.getPartitionCount(client, topic) * Utils.getReplicationFactor(client, topic)) / (double)Utils.getBrokerCount());
+            int averageDirectoryCountPerBroker = (int) Math
+                    .ceil((double) (Utils.getPartitionCount(client, topic) * Utils.getReplicationFactor(client, topic))
+                            / (double) Utils.getBrokerCount());
             logger.debug("Average Directory count per Broker for topic {}: {}", topic, averageDirectoryCountPerBroker);
             String zNodeDataForTopic = Utils.getDataFromTopicZNode(client, topic);
             String localBrokerIdStr = "" + Utils.getLocalBrokerId();
-            int directoryCountOnLocalBroker = Utils.getSubStringOccurrenceCount(zNodeDataForTopic, localBrokerIdStr);
-            logger.debug("Directory count on local broker for topic {} is {}", topic, directoryCountOnLocalBroker);
-            if(directoryCountOnLocalBroker < averageDirectoryCountPerBroker) {
+            int directoryCountOnLocalBroker = Utils.getPartitionCountOnBrokerForTopic(zNodeDataForTopic,
+                    localBrokerIdStr);
+            logger.debug("Directory count on local broker {} for topic {} is {}", Utils.getLocalBrokerId(), topic,
+                    directoryCountOnLocalBroker);
+            if (directoryCountOnLocalBroker < averageDirectoryCountPerBroker) {
                 logger.debug("Topic {} has directoryCountOnLocalBroker < averageDirectoryCountPerBroker", topic);
-                //look for any adoption ads for this topic
+                // look for any adoption ads for this topic
                 Partition adForTopic = adoptionAdsTopicsPartitionsMap.get(topic);
-                if(adForTopic != null) {
+                if (adForTopic != null) {
+                    logger.debug("Partition to Take in: {}", topic);
                     return adForTopic;
                 }
             }
@@ -209,11 +216,11 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
     }
 
     public void advertisePartitionForAdoption(Partition partitionToGiveOut) throws Exception {
-        //clear any previous ads by this broker
+        // clear any previous ads by this broker
         List<String> prevAds = Utils.getAdoptionAds(client);
         String localBrokerId = "" + Utils.getLocalBrokerId();
         for (String prevAd : prevAds) {
-            if(prevAd.startsWith(localBrokerId)) {
+            if (prevAd.startsWith(localBrokerId)) {
                 logger.debug("Deleting previous Ad posting {}", prevAd);
                 client.delete().forPath(ADOPTION_ADS_ROOT_ZNODE + "/" + prevAd);
             }
@@ -221,23 +228,24 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
 
         String adZNode = ADOPTION_ADS_ROOT_ZNODE + "/" + partitionToGiveOut.getPartitionFullNameWithBrokerId();
         logger.debug("Posting Ad for {}", adZNode);
-        //create an ephemeral ad post
+        // create an ephemeral ad post
         client.create().withMode(CreateMode.EPHEMERAL).forPath(adZNode, AD_POSTING_TEXT.getBytes());
         long adPostTime = System.currentTimeMillis();
         logger.debug("Ad {} created at {}", adZNode, adPostTime);
-        while(new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT) && System.currentTimeMillis() - adPostTime < AD_EXPIRY_MS) {
+        while (new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)
+                && System.currentTimeMillis() - adPostTime < AD_EXPIRY_MS) {
             logger.debug("Ad {} is active. Sleeping 1 min", adZNode);
             Thread.sleep(60000);
         }
 
-        if(!new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
+        if (!new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
             logger.debug("Partition {} got adopted", adZNode);
-        }
-        else {
+        } else {
             logger.debug("Expired the Ad for {}", adZNode);
         }
 
-        //Someone has adopted this partition, or the Ad needs to expire. Delete the Ad
+        // Someone has adopted this partition, or the Ad needs to expire. Delete
+        // the Ad
         logger.debug("Deleting Ad node {}", adZNode);
         client.delete().forPath(adZNode);
     }
@@ -245,98 +253,98 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
     public void adoptRemotePartition(Partition partitionToTakeIn) throws Exception {
         String adZNode = ADOPTION_ADS_ROOT_ZNODE + "/" + partitionToTakeIn.getPartitionFullNameWithBrokerId();
         logger.debug("Will try to adopt Partition {}", adZNode);
-        //try to lock the Ad first and then initiate the adoption process
-        String adZNodeLockPath = ADOPTION_ADS_LOCK_ROOT_ZNODE + "/" + partitionToTakeIn.getPartitionFullNameWithBrokerId();
+        // try to lock the Ad first and then initiate the adoption process
+        String adZNodeLockPath = ADOPTION_ADS_LOCK_ROOT_ZNODE + "/"
+                + partitionToTakeIn.getPartitionFullNameWithBrokerId();
         InterProcessMutex lock = new InterProcessMutex(client, adZNodeLockPath);
-        if ( lock.acquire(30000, TimeUnit.MILLISECONDS) )
-        {
+        if (lock.acquire(30000, TimeUnit.MILLISECONDS)) {
             logger.debug("Successfully acquired lock on Ad: {}", adZNodeLockPath);
-            try
-            {
-                //check again if the Ad is still valid
-                if(new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
-                    boolean reassignmentSucceeded = reassignPartitionToLocalBroker(
-                            partitionToTakeIn.brokerId,
-                            partitionToTakeIn.topicName,
-                            partitionToTakeIn.partitionId,
-                            Utils.getLocalBrokerId(),
+            try {
+                // check again if the Ad is still valid
+                if (new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
+                    boolean reassignmentSucceeded = reassignPartitionToLocalBroker(partitionToTakeIn.brokerId,
+                            partitionToTakeIn.topicName, partitionToTakeIn.partitionId, Utils.getLocalBrokerId(),
                             adZNode);
                     logger.debug("Reassignment succeeded: {}", reassignmentSucceeded);
-                }
-                else {
+                } else {
                     logger.debug("Ad {} seems stale. Skipping adoption process", adZNode);
                 }
-            }
-            finally
-            {
+            } catch (Exception e) {
+                e.printStackTrace();
+            } finally {
                 lock.release();
-                while(true) {
+                while (true) {
                     try {
                         client.delete().forPath(adZNodeLockPath);
                         break;
-                    }
-                    catch(KeeperException.NoNodeException noNodeEx) {
-                        //ignore and break
+                    } catch (KeeperException.NoNodeException noNodeEx) {
+                        // ignore and break
                         break;
-                    }
-                    catch (Exception ex) {
-                        logger.debug("Trying to delete {} after releasing lock but got exception {}. Will retry", adZNodeLockPath, ex);
+                    } catch (Exception ex) {
+                        logger.debug("Trying to delete {} after releasing lock but got exception {}. Will retry",
+                                adZNodeLockPath, ex);
                     }
                 }
             }
-        }
-        else {
+        } else {
             logger.debug("Failed to acquire lock on Ad: {}", adZNodeLockPath);
         }
     }
 
-    private boolean reassignPartitionToLocalBroker(int remoteBrokerId, String topicName, int partitionId, int localBrokerId, String adZNode) throws Exception {
+    private boolean reassignPartitionToLocalBroker(int remoteBrokerId, String topicName, int partitionId,
+            int localBrokerId, String adZNode) throws Exception {
         boolean succeeded = false;
         String reassignmentConfigFileName = "partitions-to-move.json." + System.currentTimeMillis();
-        String reassignmentProcessLockPath = ADOPTION_ADS_LOCK_ROOT_ZNODE;
+        String reassignmentProcessLockPath = ADOPTION_ADS_ROOT_ZNODE+"/locks";
         InterProcessMutex lock = new InterProcessMutex(client, reassignmentProcessLockPath);
-        while(!succeeded) {
-            if (lock.acquire(30000, TimeUnit.MILLISECONDS) )
+        while (!succeeded) {
+            logger.debug("Trying Root Lock: {}", reassignmentProcessLockPath);
+            if (lock.acquire(30000, TimeUnit.MILLISECONDS)) 
             {
                 logger.debug("Locking {} succeeded", reassignmentProcessLockPath);
                 try {
                     String currentReplicas = Utils.getReplicasOfTopicPartition(client, topicName, partitionId);
-                    String desiredReplicas = currentReplicas.replace(""+remoteBrokerId, ""+localBrokerId);
-                    String reassignmentJson = String.format("{\"partitions\":[{\"topic\":\"%s\",\"partition\":%d,\"replicas\":[%s]}],\"version\":1}", topicName, partitionId, desiredReplicas);
-                    //do kafka reassignment
+                    String desiredReplicas = currentReplicas.replace("" + remoteBrokerId, "" + localBrokerId);
+                    String reassignmentJson = String.format(
+                            "{\"partitions\":[{\"topic\":\"%s\",\"partition\":%d,\"replicas\":[%s]}],\"version\":1}",
+                            topicName, partitionId, desiredReplicas);
+                    // do kafka reassignment
                     PrintWriter out = new PrintWriter(reassignmentConfigFileName);
-                    out.println( reassignmentJson );
+                    out.println(reassignmentJson);
                     out.close();
                     logger.debug("Reassignment will be kicked for {}", reassignmentJson);
-                    String[] reassignCmdArgs = {
-                            "--reassignment-json-file=" + reassignmentConfigFileName,
-                            "--zookeeper=" + client.getZookeeperClient().getCurrentConnectionString(),
-                            "--execute"
-                    };
+                    String[] reassignCmdArgs = { "--reassignment-json-file=" + reassignmentConfigFileName,
+                            "--zookeeper=" + client.getZookeeperClient().getCurrentConnectionString(), "--execute" };
                     ReassignPartitionsCommand.main(reassignCmdArgs);
-                    //Hacky: Restart kafka controller. Controller seems buggy sometimes
+                    // Hacky: Restart kafka controller. Controller seems buggy
+                    // sometimes
                     Utils.restartKafkaController(client);
-                    //Hacky: Sleep for 5 mins to let the reassignment process complete
+                    // Hacky: Sleep for 5 mins to let the reassignment process
+                    // complete
                     logger.debug("Reassignment command has been initiated. Will sleep for {} ms", 10 * 60000);
                     Thread.sleep(10 * 60000);
 
                     Files.deleteIfExists(Paths.get(reassignmentConfigFileName));
 
-                    logger.debug("Setting data for Ad {} as {}", adZNode, AD_ADOPTION_COMPLETE_TEXT + "-" + localBrokerId);
-                    //mark the ad as done
+                    logger.debug("Setting data for Ad {} as {}", adZNode,
+                            AD_ADOPTION_COMPLETE_TEXT + "-" + localBrokerId);
+                    // mark the ad as done
                     client.setData().forPath(adZNode, (AD_ADOPTION_COMPLETE_TEXT + "-" + localBrokerId).getBytes());
                     succeeded = true;
+                } catch (Exception e) {
+                    e.printStackTrace();
                 } finally {
+                    logger.debug("Releasing Aquired Lock...");
                     lock.release();
+                    logger.debug("Lock {}", lock.isAcquiredInThisProcess());
                 }
             } else {
                 logger.debug("Locking {} failed. Will probably retry", reassignmentProcessLockPath);
-                //check if ad is still valid, otherwise break retry loop
-                if(!new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
+                // check if ad is still valid, otherwise break retry loop
+                if (!new String(client.getData().forPath(adZNode)).equals(AD_POSTING_TEXT)) {
                     logger.debug("Ad {} has expired. Quit trying to reassign", adZNode);
                     break;
-                }
-                else {
+                } else {
                     logger.debug("Ad {} is still valid. Will retry", adZNode);
                 }
             }
@@ -345,3 +353,5 @@ public class ZookeeperBackedAdoptionLogicImpl implements IAdoptionLogic, Runnabl
         return succeeded;
     }
 }
+
+  
