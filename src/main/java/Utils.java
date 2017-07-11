@@ -155,15 +155,19 @@ public class Utils {
         return ((fullString.length() - newStr.length())/subString.length());
     }
 
+    public static int getPartitionCountOnBrokerForTopic(String topicData,  String brokerID ){
+        return getSubStringOccurrenceCount(topicData, "["+brokerID+"]");
+    }
     public static int getAnyPartitionNumberForBrokerAndTopic(String topicZNodeData, String brokerId) {
-        int indexOfFirstOccurrenceOfBrokerId = topicZNodeData.indexOf(brokerId);
-        String substringTillFirstOccurrenceOfBrokerId = topicZNodeData.substring(0, indexOfFirstOccurrenceOfBrokerId);
-        int indexOfDoubleQuoteBeforeFirstOccurrenceOfBrokerId = substringTillFirstOccurrenceOfBrokerId.lastIndexOf("\"");
-        String substringTillLastDoubleQuoteBeforeFirstOccurrenceOfBrokerId = substringTillFirstOccurrenceOfBrokerId.substring(0, indexOfDoubleQuoteBeforeFirstOccurrenceOfBrokerId);
-        int indexOfSecondFromLastDoubleQuoteBeforeFirstOccurrenceOfBrokerId = substringTillLastDoubleQuoteBeforeFirstOccurrenceOfBrokerId.lastIndexOf("\"");
-        String partitionNumber = substringTillFirstOccurrenceOfBrokerId.substring(indexOfSecondFromLastDoubleQuoteBeforeFirstOccurrenceOfBrokerId + 1, indexOfDoubleQuoteBeforeFirstOccurrenceOfBrokerId);
-
-        return Integer.parseInt(partitionNumber);
+        List<Integer> partitionNumbers = new ArrayList<Integer>();
+        Pattern p = Pattern.compile("\\[("+brokerId+")\\]");  // Regex
+        Matcher m = p.matcher(topicZNodeData);
+        while (m.find()) {
+            int endPosition = m.start()-2;
+            int startPosition = topicZNodeData.substring(0, endPosition).lastIndexOf('"')+1;
+            partitionNumbers.add(Integer.parseInt(topicZNodeData.substring(startPosition,endPosition)));
+        }
+        return partitionNumbers.get(ThreadLocalRandom.current().nextInt(0, partitionNumbers.size()));
     }
 
     public static String getReplicasOfTopicPartition(CuratorFramework client, String topic, int partition) throws Exception {
